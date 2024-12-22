@@ -41,7 +41,6 @@ class RingTrapPotential:
                                                    self.wz,
                                                    positions)
 
-
     def jac(self, positions, ensemble_properties, language="python"):
         """
         Computes the gradient vector of the trapping potential given the coordinates of all ions in the chain.
@@ -56,7 +55,7 @@ class RingTrapPotential:
             r_coords = np.sqrt(x**2 + y**2)
             grad[:n] = ((self.wr)**2) * (r_coords - self.trap_radius) * (x / r_coords)
             grad[n:2*n] = ((self.wr)**2) * (r_coords - self.trap_radius) * (y / r_coords)
-            grad[2*n:3*n] = ((self.wz)**2) * z
+            grad[2*n:3*n] = ((self.wz) ** 2) * z
             return ensemble_properties["mass"] * grad
         else:
             return np.array(cpotentials.ring_trap_jac(ensemble_properties["mass"],
@@ -64,6 +63,25 @@ class RingTrapPotential:
                                                       self.wr, 
                                                       self.wz,
                                                       positions))
+    
+    def hess(self, positions, ensemble_properties, language="python"):
+        if language == "python":
+            n = ensemble_properties["n"]
+            x = positions[:n]
+            y = positions[n:2*n]
+            # z = positions[2*n:3*n]
+
+            hessian = np.zeros((3*n, 3*n))
+            for i in range(n):
+                hessian[i][i] += (self.wr ** 2) * (1 - (self.trap_radius * (y[i] ** 2)) / ((x[i] ** 2 + y[i] ** 2) ** (3/2)))
+                hessian[n+i][n+i] += (self.wr ** 2) * (1 - (self.trap_radius * (x[i] ** 2)) / ((x[i] ** 2 + y[i] ** 2) ** (3/2)))
+                hessian[2*n+i][2*n+i] += (self.wz ** 2)
+                hessian[i][n+i] += ((self.wr ** 2) * self.trap_radius * x[i] * y[i]) / ((x[i] ** 2 + y[i] ** 2) ** (3/2))
+                hessian[n*i][i] += ((self.wr ** 2) * self.trap_radius * x[i] * y[i]) / ((x[i] ** 2 + y[i] ** 2) ** (3/2))
+
+            return ensemble_properties["mass"] * hessian
+        else:
+            return None
 
     def force(self, positions, ensemble_properties, language="python"):
         """Computes the force on each ion due to this potential"""
@@ -169,7 +187,6 @@ class MutualCoulombPotential:
         else:
             return cpotentials.mutual_coulomb_potential(ensemble_properties["charge"], positions)
 
-
     def jac(self, positions, ensemble_properties, language="python"):
         """
         Computes the gradient vector of the Coulomb potential given the coordinates of all ions in the chain.
@@ -189,6 +206,48 @@ class MutualCoulombPotential:
             return grad
         else:
             return np.array(cpotentials.mutual_coulomb_jac(ensemble_properties["charge"], positions))
+
+    def hess(self, positions, ensemble_properties, language="python"):
+        if language == "python":
+            n = ensemble_properties["n"]
+            x = positions[:n]
+            y = positions[n:2*n]
+            z = positions[2*n:3*n]
+
+            dist2 = np.zeros((n, n))
+            for i in range(n):
+                for j in range(n):
+                    dist2[i,j] = ((x[i] - x[j]) ** 2) + ((y[i] - y[j]) ** 2) + ((z[i] - z[j]) ** 2)
+
+            hessian = np.zeros((3*n, 3*n))
+            for i in range(n):
+                for j in range(n):
+                    if i == j:
+                        for k in range(n):
+                            if k != i:
+                                hessian[i][i] -= ((dist2[i,k] - 3*((x[i] - x[k]) ** 2)) / (dist2[i,k] ** (5/2)))
+                                hessian[n+i][n+i] -= ((dist2[i,k] - 3*((y[i] - y[k]) ** 2)) / (dist2[i,k] ** (5/2)))
+                                hessian[2*n+i][2*n+i] -= ((dist2[i,k] - 3*((z[i] - z[k]) ** 2)) / (dist2[i,k] ** (5/2)))
+                                hessian[i][n+i] += 3 * (((x[i]-x[k])*(y[i]-y[k])) / (dist2[i,k] ** (5/2)))
+                                hessian[n+i][i] += 3 * (((x[i]-x[k])*(y[i]-y[k])) / (dist2[i,k] ** (5/2)))
+                                hessian[i][2*n+i] += 3 * (((x[i]-x[k])*(z[i]-z[k])) / (dist2[i,k] ** (5/2)))
+                                hessian[2*n+i][i] += 3 * (((x[i]-x[k])*(z[i]-z[k])) / (dist2[i,k] ** (5/2)))
+                                hessian[n+i][2*n+i] += 3 * (((y[i]-y[k])*(z[i]-z[k])) / (dist2[i,k] ** (5/2)))
+                                hessian[2*n+i][n+i] += 3 * (((y[i]-y[k])*(z[i]-z[k])) / (dist2[i,k] ** (5/2)))
+                    else:
+                        hessian[i][j] = ((dist2[i,j] - 3*((x[i]-x[j]) ** 2)) / (dist2[i,j] ** (5/2)))
+                        hessian[n+i][n+j] = ((dist2[i,j] - 3*((y[i]-y[j]) ** 2)) / (dist2[i,j] ** (5/2)))
+                        hessian[2*n+i][2*n+j] = ((dist2[i,j] - 3*((z[i]-z[j]) ** 2)) / (dist2[i,j] ** (5/2)))
+                        hessian[i][n+j] = -3 * ( ((x[i]-x[j])*(y[i]-y[j])) / (dist2[i,j] ** (5/2)) )
+                        hessian[n+i][j] = -3 * ( ((x[i]-x[j])*(y[i]-y[j])) / (dist2[i,j] ** (5/2)) )
+                        hessian[i][2*n+j] = -3 * ( ((x[i]-x[j])*(z[i]-z[j])) / (dist2[i,j] ** (5/2)) )
+                        hessian[2*n+i][j] = -3 * ( ((x[i]-x[j])*(z[i]-z[j])) / (dist2[i,j] ** (5/2)) )
+                        hessian[n+i][2*n+j] = -3 * ( ((y[i]-y[j])*(z[i]-z[j])) / (dist2[i,j] ** (5/2)) )
+                        hessian[2*n+i][n+j] = -3 * ( ((y[i]-y[j])*(z[i]-z[j])) / (dist2[i,j] ** (5/2)) )
+
+            return k * (ensemble_properties["charge"] ** 2) * hessian
+        else:
+            return None
 
     def force(self, positions, ensemble_properties, language="python"):
         """Computes the force on each ion due to this potential"""
